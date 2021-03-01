@@ -215,8 +215,8 @@ def createTiles(arg):
     print('...Completed tiles for ' + str(ext) + ' at zoom level ' + str(zoom) + ' to ' + OutputTileDirectory)
 
     args = (zoom, OutputTileDirectory, )
-    deleteEmptyTiles(args)
-    uploadTiles(args)
+    deleteEmptyTiles(arg)
+    uploadTiles(arg)
 
     return 0
 
@@ -367,7 +367,7 @@ def handler(event, context):
         arg += (OutputTileDirectory,)
         arg += (qgisCacheName,)
         arg += (qgisCacheBucket,)
-        
+
         createTiles(arg)
     else:
         print("The raster does not have a valid projection, its likely you created it with software that created a custom or vendor specific projection. You shoould try reprojecting the image with gdal, gdalwarp to a defined proj4 projection, the site http://spatialreference.org/ref/epsg/3031/ can help find the correct and known EPSG code.")
