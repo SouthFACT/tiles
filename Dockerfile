@@ -7,6 +7,7 @@ RUN pip3 --no-cache-dir install urllib3
 RUN apt-get clean
 RUN pip cache purge
 
+
 WORKDIR /
 RUN mkdir -p ${FUNCTION_DIR}
 RUN pip3 install --upgrade --target ${FUNCTION_DIR} awslambdaric

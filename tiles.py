@@ -43,52 +43,6 @@ gdal.UseExceptions()    # Enable exceptions
 # warnings.filterwarnings("ignore", category=DeprecationWarning)  # ignore annoying Deprecation Warnings
 warnings.filterwarnings("ignore")
 
-
-# aws source based on AWS s3 folder/image.tif
-AWSSource = os.environ.get('s3sourceimage')
-
-# the bounds of minX etc should be in WGS84 lat long and should be  a bounds of
-# equal to zoom level 7 box. the ideas is that the function will take in as argument a
-# the bounds for the entire tiled area so it can do it all at once in lambda
-# for southfact that is about 69 squares/processes once a day + one that does zoom-level 1-6
-minX = os.environ.get('minX')
-maxX = os.environ.get('maxX')
-minY = os.environ.get('minY')
-maxY = os.environ.get('maxY')
-
-# change type is used for getting setting QGIS style file stored on AWS s3
-#  should be standard used to lookup actual file
-#  can be one of four NDVI, NDMI, SWIR, SWIRT or swir threshold
-changeType = os.environ.get('changeType')
-
-# of the options this is valid style file
-qgisStyles = {
-    'SWIR': 'qgis-styles-for-tile-creation/SWIR_SOUTHFACT_nodata_0.qml',
-    'SWIRT': 'qgis-styles-for-tile-creation/SWIRThreshold_SOUTHFACT.qml',
-    'NDVI': 'qgis-styles-for-tile-creation/NDVI_SOUTHFACT_nodata_0.qml',
-    'NDMI': 'qgis-styles-for-tile-creation/NDMI_SOUTHFACT_nodata_0.qml'}
-
-qgisCacheLoc = {
-    'SWIR': 'test-tile', #     'SWIR': 'latest_change_SWIR',
-    'SWIRT': 'latest_change_SWIR_threshold',
-    'NDVI': 'latest_change_NDVI',
-    'NDMI': 'latest_change_NDMI'}
-
-# set the style file
-qgisStyleBucket = 'data.southfact.com'
-qgisStyleS3Name = qgisStyles[changeType]
-
-qgisCacheBucket = 'tiles.southfact.com'
-qgisCacheName = qgisCacheLoc[changeType]
-
-# zoom level to process
-zoomLevel = os.environ.get('zoomLevel')
-
-# this will always be temp and then will aws sync to s3
-OutputTileDirectory = '/tmp/cache'
-if not os.path.exists(OutputTileDirectory):
-    os.mkdir(OutputTileDirectory)
-
 # See https://gis.stackexchange.com/a/155852/4972 for details about the prefix
 QgsApplication.setPrefixPath('/usr', True)
 # set view to 3857 this will virtually reproject "on the fly" the raster
@@ -208,6 +162,8 @@ def uploadTiles(arg):
     zoom = arg[0]
     OutputTileDirectory = arg[1]
     tileDir = OutputTileDirectory + '/' + str(zoom)
+    qgisCacheName = arg[3]
+    qgisCacheBucket = arg[4]
 
     s3 = boto3.client('s3')
 
@@ -329,8 +285,63 @@ def convert(seconds):
 
     return "%d:%02d:%02d" % (hour, minutes, seconds)
 
-# if __name__ == '__main__':
+# lambda hanlder function
 def handler(event, context):
+    # get events passed into lambda via string like this:
+    # {
+    #   "changeType": "SWIR",
+    #   "maxX": "-78.74999865279393",
+    #   "maxY": "36.59788859227511",
+    #   "minX": "-81.56249860467942",
+    #   "minY": "34.30714333961697",
+    #   "s3sourceimage": "2018-2017/swirYearlyChange2018L8CONUS.tif",
+    #   "zoomLevel": "7"
+    # }
+    # aws source based on AWS s3 folder/image.tif
+    AWSSource = event['s3sourceimage']
+
+    # the bounds of minX etc should be in WGS84 lat long and should be  a bounds of
+    # equal to zoom level 7 box. the ideas is that the function will take in as argument a
+    # the bounds for the entire tiled area so it can do it all at once in lambda
+    # for southfact that is about 69 squares/processes once a day + one that does zoom-level 1-6
+    minX = event['minX']
+    maxX = event['maxX']
+    minY = event['minY']
+    maxY = event['maxY']
+
+    # change type is used for getting setting QGIS style file stored on AWS s3
+    #  should be standard used to lookup actual file
+    #  can be one of four NDVI, NDMI, SWIR, SWIRT or swir threshold
+    changeType = event['changeType']
+
+    # of the options this is valid style file
+    qgisStyles = {
+        'SWIR': 'qgis-styles-for-tile-creation/SWIR_SOUTHFACT_nodata_0.qml',
+        'SWIRT': 'qgis-styles-for-tile-creation/SWIRThreshold_SOUTHFACT.qml',
+        'NDVI': 'qgis-styles-for-tile-creation/NDVI_SOUTHFACT_nodata_0.qml',
+        'NDMI': 'qgis-styles-for-tile-creation/NDMI_SOUTHFACT_nodata_0.qml'}
+
+    qgisCacheLoc = {
+        'SWIR': 'test-tile', #     'SWIR': 'latest_change_SWIR',
+        'SWIRT': 'latest_change_SWIR_threshold',
+        'NDVI': 'latest_change_NDVI',
+        'NDMI': 'latest_change_NDMI'}
+
+    # set the style file
+    qgisStyleBucket = 'data.southfact.com'
+    qgisStyleS3Name = qgisStyles[changeType]
+
+    qgisCacheBucket = 'tiles.southfact.com'
+    qgisCacheName = qgisCacheLoc[changeType]
+
+    # zoom level to process
+    zoomLevel = event['zoomLevel']
+
+    # this will always be temp and then will aws sync to s3
+    OutputTileDirectory = '/tmp/cache'
+    if not os.path.exists(OutputTileDirectory):
+        os.mkdir(OutputTileDirectory)
+
     # so more can be done at the same time
     qgisStylePath = '/tmp/qgisstyle.qml'
 
@@ -352,9 +363,11 @@ def handler(event, context):
         # get arguments for tile
         extString = str(minX) + ',' + str(maxX) + ',' + str(minY) + ',' + str(maxY)
         arg = (extString,)
-        arg +=(zoomLevel,)
-        arg +=(OutputTileDirectory,)
-
+        arg += (zoomLevel,)
+        arg += (OutputTileDirectory,)
+        arg += (qgisCacheName,)
+        arg += (qgisCacheBucket,)
+        
         createTiles(arg)
     else:
         print("The raster does not have a valid projection, its likely you created it with software that created a custom or vendor specific projection. You shoould try reprojecting the image with gdal, gdalwarp to a defined proj4 projection, the site http://spatialreference.org/ref/epsg/3031/ can help find the correct and known EPSG code.")
