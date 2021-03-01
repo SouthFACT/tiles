@@ -147,8 +147,9 @@ def addStyle(qgisStylePath, rasterTileLayer):
     return outputs
 
 def deleteEmptyTiles(arg):
-    zoom = arg[0]
-    OutputTileDirectory = arg[1]
+    ext = arg[0]
+    zoom = arg[1]
+    OutputTileDirectory = arg[2]
     tileDelDir = OutputTileDirectory + '/' + str(zoom)
 
     # delete empty tile images
@@ -159,8 +160,9 @@ def deleteEmptyTiles(arg):
 
 # uplopads the tiles to s3
 def uploadTiles(arg):
-    zoom = arg[0]
-    OutputTileDirectory = arg[1]
+    ext = arg[0]
+    zoom = arg[1]
+    OutputTileDirectory = arg[2]
     tileDir = OutputTileDirectory + '/' + str(zoom)
     qgisCacheName = arg[3]
     qgisCacheBucket = arg[4]
@@ -362,11 +364,11 @@ def handler(event, context):
 
         # get arguments for tile
         extString = str(minX) + ',' + str(maxX) + ',' + str(minY) + ',' + str(maxY)
-        arg = (extString,)
-        arg += (zoomLevel,)
-        arg += (OutputTileDirectory,)
-        arg += (qgisCacheName,)
-        arg += (qgisCacheBucket,)
+        arg = (extString,) # 0
+        arg += (zoomLevel,) # 1
+        arg += (OutputTileDirectory,) # 2
+        arg += (qgisCacheName,) # 3
+        arg += (qgisCacheBucket,) # 4
 
         createTiles(arg)
     else:
