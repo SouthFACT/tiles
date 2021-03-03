@@ -68,15 +68,15 @@ canvas = QgsMapCanvas()
 project = QgsProject.instance()
 canvas.show()
 
-def clipSource(AWSSource, minX, maxX, minY, maxY):
+def clipSource(imageSource, minX, maxX, minY, maxY):
         print('grabing image for processing tiles')
         # RasterFormat = 'GTiff'
         RasterFormat = 'VRT'
         PixelRes = 240
-        AWSPrefix = '/vsis3/data.southfact.com/'
+        AWSPrefix = '/vsis3/'
 
         # Open dataset from AWS S3
-        AWSRaster = gdal.Open(AWSPrefix + AWSSource, gdal.GA_ReadOnly)
+        AWSRaster = gdal.Open(AWSPrefix + imageSource, gdal.GA_ReadOnly)
         RasterProjection = AWSRaster.GetProjectionRef()
 
         #create 3857 project definition
@@ -147,10 +147,11 @@ def addStyle(qgisStylePath, rasterTileLayer):
     return outputs
 
 def deleteEmptyTiles(arg):
-    ext = arg[0]
-    zoom = arg[1]
-    OutputTileDirectory = arg[2]
+    ext = arg['extString']
+    zoom = arg['zoomLevel']
+    OutputTileDirectory = arg['OutputTileDirectory']
     tileDelDir = OutputTileDirectory + '/' + str(zoom)
+
 
     # delete empty tile images
     print('...Starting deleting empty tiles for at zoom level ' + str(zoom))
@@ -160,12 +161,12 @@ def deleteEmptyTiles(arg):
 
 # uplopads the tiles to s3
 def uploadTiles(arg):
-    ext = arg[0]
-    zoom = arg[1]
-    OutputTileDirectory = arg[2]
+    ext = arg['extString']
+    zoom = arg['zoomLevel']
+    tileBucket = arg['tileBucket']
+    tileFolder = arg['tileFolder']
+    OutputTileDirectory = arg['OutputTileDirectory']
     tileDir = OutputTileDirectory + '/' + str(zoom)
-    qgisCacheName = arg[3]
-    qgisCacheBucket = arg[4]
 
     s3 = boto3.client('s3')
 
@@ -177,10 +178,10 @@ def uploadTiles(arg):
             for file in files:
                 complete_file_path = os.path.join(root, file)
                 file = nested_dir + file if nested_dir else file
-                s3FolderAndFile = qgisCacheName + '/' + str(zoom) + '/' + file
-                s3.upload_file(complete_file_path, qgisCacheBucket, s3FolderAndFile)
-                s3.put_object_acl( ACL='public-read', Bucket=qgisCacheBucket, Key=s3FolderAndFile )
-                print('...uploading file for the tile ' + tileDir + ' to ' + qgisCacheBucket + '/' + s3FolderAndFile)
+                s3FolderAndFile = tileFolder + '/' + str(zoom) + '/' + file
+                s3.upload_file(complete_file_path, tileBucket, s3FolderAndFile)
+                s3.put_object_acl( ACL='public-read', Bucket=tileBucket, Key=s3FolderAndFile )
+                print('...uploading file for the tile ' + tileDir + ' to ' + tileBucket + '/' + s3FolderAndFile)
                 try:
                     os.remove(complete_file_path)
                 except OSError:
@@ -190,9 +191,9 @@ def uploadTiles(arg):
 # sets up and creates the tiles for a canvas
 def createTiles(arg):
     # line_no, line, zoom, OutputTileDirectory = arg
-    ext = arg[0]
-    zoom = arg[1]
-    OutputTileDirectory = arg[2]
+    ext = arg['extString']
+    zoom = arg['zoomLevel']
+    OutputTileDirectory = arg['OutputTileDirectory']
 
     print('...Starting tiles for ' + str(ext) + ' at zoom level ' + str(zoom))
 
@@ -291,16 +292,23 @@ def convert(seconds):
 def handler(event, context):
     # get events passed into lambda via string like this:
     # {
-    #   "changeType": "SWIR",
-    #   "maxX": "-78.74999865279393",
-    #   "maxY": "36.59788859227511",
-    #   "minX": "-81.56249860467942",
-    #   "minY": "34.30714333961697",
-    #   "s3sourceimage": "2018-2017/swirYearlyChange2018L8CONUS.tif",
-    #   "zoomLevel": "7"
+    #   "maxX": "0",
+    #   "maxY": "85.051128514163",
+    #   "minX": "0",
+    #   "minY": "-179.999996920672",
+    #   "zoomLevel": "1",
+    #   "imageBucket": "data.southfact.com",
+    #   "imageFile": "current-year-to-date/swirLatestChangeL8CONUS.tif",
+    #   "styleBucket": "data.southfact.com",
+    #   "styleFile": "qgis-styles-for-tile-creation/SWIR_SOUTHFACT_nodata_0.qml",
+    #   "tileBucket": "tiles.southfact.com",
+    #   "tileFolder": "latest_change_SWIR_L8"
     # }
+
     # aws source based on AWS s3 folder/image.tif
-    AWSSource = event['s3sourceimage']
+    imageBucket = event['imageBucket']
+    imageFile = event['imageFile']
+    imageSource =  imageBucket + '/' + imageFile
 
     # the bounds of minX etc should be in WGS84 lat long and should be  a bounds of
     # equal to zoom level 7 box. the ideas is that the function will take in as argument a
@@ -311,47 +319,42 @@ def handler(event, context):
     minY = event['minY']
     maxY = event['maxY']
 
-    # change type is used for getting setting QGIS style file stored on AWS s3
-    #  should be standard used to lookup actual file
-    #  can be one of four NDVI, NDMI, SWIR, SWIRT or swir threshold
-    changeType = event['changeType']
-
+    #QGis style bucket, folder/filename.qml
     # of the options this is valid style file
-    qgisStyles = {
-        'SWIR': 'qgis-styles-for-tile-creation/SWIR_SOUTHFACT_nodata_0.qml',
-        'SWIRT': 'qgis-styles-for-tile-creation/SWIRThreshold_SOUTHFACT.qml',
-        'NDVI': 'qgis-styles-for-tile-creation/NDVI_SOUTHFACT_nodata_0.qml',
-        'NDMI': 'qgis-styles-for-tile-creation/NDMI_SOUTHFACT_nodata_0.qml'}
+    styleBucket = event['styleBucket']
+    styleFile = event['styleFile']
 
-    qgisCacheLoc = {
-        'SWIR': 'test-tile', #     'SWIR': 'latest_change_SWIR',
-        'SWIRT': 'latest_change_SWIR_threshold',
-        'NDVI': 'latest_change_NDVI',
-        'NDMI': 'latest_change_NDMI'}
-
-    # set the style file
-    qgisStyleBucket = 'data.southfact.com'
-    qgisStyleS3Name = qgisStyles[changeType]
-
-    qgisCacheBucket = 'tiles.southfact.com'
-    qgisCacheName = qgisCacheLoc[changeType]
+    #tile cache bucket and folder
+    tileBucket = event['tileBucket']
+    tileFolder =  event['tileFolder']
 
     # zoom level to process
     zoomLevel = event['zoomLevel']
+
+    # get arguments for tile
+    extString = str(minX) + ',' + str(maxX) + ',' + str(minY) + ',' + str(maxY)
 
     # this will always be temp and then will aws sync to s3
     OutputTileDirectory = '/tmp/cache'
     if not os.path.exists(OutputTileDirectory):
         os.mkdir(OutputTileDirectory)
 
+    arg = {
+        'extString': extString,
+        'zoomLevel': zoomLevel,
+        'OutputTileDirectory': OutputTileDirectory,
+        'tileBucket': tileBucket,
+        'tileFolder': tileFolder
+    }
+
     # so more can be done at the same time
     qgisStylePath = '/tmp/qgisstyle.qml'
 
     s3 = boto3.client('s3')
 
-    s3.download_file(qgisStyleBucket, qgisStyleS3Name, qgisStylePath)
+    s3.download_file(styleBucket, styleFile, qgisStylePath)
 
-    imageForTiles = clipSource(AWSSource, minX, maxX, minY, maxY)
+    imageForTiles = clipSource(imageSource, minX, maxX, minY, maxY)
     rasterTileLayer = addRaster(imageForTiles)
     rasterCRS = rasterTileLayer.crs()
 
@@ -361,14 +364,6 @@ def handler(event, context):
         # setup enviroment for qgis map
         setupEnviroment(rasterTileLayer)
         addStyle(qgisStylePath, rasterTileLayer)
-
-        # get arguments for tile
-        extString = str(minX) + ',' + str(maxX) + ',' + str(minY) + ',' + str(maxY)
-        arg = (extString,) # 0
-        arg += (zoomLevel,) # 1
-        arg += (OutputTileDirectory,) # 2
-        arg += (qgisCacheName,) # 3
-        arg += (qgisCacheBucket,) # 4
 
         createTiles(arg)
     else:
