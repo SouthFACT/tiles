@@ -52,3 +52,35 @@ Add this as the index document: ```blank.png``` (blank.png must be in the route 
 
 ![blank.png](aws-blankpng-redirect.png?raw=true "blank.png")
 
+
+# Create Lambda function for tile creations
+
+### Push docker image and tile creation code to AWS ECR so we can use it in lambda function
+
+#### set env variables for aws key and secret id for the ecr user obviously use the correct key id and key. do commit to GH
+```
+AWS_ACCESS_KEY_ID=[the correct AWS aws_access_key_id]
+AWS_SECRET_ACCESS_KEY=[the correct AWS aws_secret_access_key]
+```
+
+#### login using the repository uri
+```
+aws ecr get-login-password --region us-east-1 --profile southfactecr | docker login --username AWS --password-stdin 937787351555.dkr.ecr.us-east-1.amazonaws.com
+```
+
+#### in separate terminal with the correct IAM user default defend as environmental variables
+```
+docker build -t test-tiles-img . --build-arg AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID --build-arg AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+```
+
+#### back on the original terminal window
+```
+docker tag test-tiles-img 937787351555.dkr.ecr.us-east-1.amazonaws.com/tiles-test
+```
+
+### pushes to the AWS repo
+```
+docker push 937787351555.dkr.ecr.us-east-1.amazonaws.com/tiles-test```
+```
+
+## After the image is pushed you will need redeploy the image in the console
