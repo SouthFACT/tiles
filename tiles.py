@@ -2,8 +2,6 @@ import sys, os, glob, time, uuid, csv, warnings, itertools, processing, numpy, b
 
 start_time = time.time()
 
-S3 = boto3.client('s3')
-
 from processing.core.Processing import Processing
 
 from osgeo import gdal
@@ -39,9 +37,11 @@ from qgis.PyQt.QtCore import QSize
 
 gdal.PushErrorHandler('CPLQuietErrorHandler')
 gdal.UseExceptions()    # Enable exceptions
+gdal.SetConfigOption('CPL_CURL_VERBOSE', 'YES')
+gdal.SetConfigOption('CPL_DEBUG', 'YES')
 
 # warnings.filterwarnings("ignore", category=DeprecationWarning)  # ignore annoying Deprecation Warnings
-warnings.filterwarnings("ignore")
+warnings.filterwarnings('ignore')
 
 # See https://gis.stackexchange.com/a/155852/4972 for details about the prefix
 QgsApplication.setPrefixPath('/usr', True)
@@ -69,11 +69,26 @@ project = QgsProject.instance()
 canvas.show()
 
 def clipSource(imageSource, minX, maxX, minY, maxY):
-        print('grabing image for processing tiles')
+        print('grabbing image for processing tiles')
+        S3 = boto3.client('s3')
+
         # RasterFormat = 'GTiff'
         RasterFormat = 'VRT'
         PixelRes = 240
         AWSPrefix = '/vsis3/'
+
+        AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+        AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+        AWS_REGION = os.getenv('AWS_REGION')
+
+        gdal.SetConfigOption('AWS_ACCESS_KEY_ID', AWS_ACCESS_KEY_ID)
+        gdal.SetConfigOption('AWS_SECRET_ACCESS_KEY', AWS_SECRET_ACCESS_KEY)
+        gdal.SetConfigOption('AWS_REGION', AWS_REGION)
+        gdal.SetConfigOption('GDAL_DISABLE_READDIR_ON_OPEN', 'FALSE')
+        gdal.VSICurlClearCache()
+        
+        print('IMAGE:' + AWSPrefix + imageSource)
+        print('AWS_REGION:' + AWS_REGION)
 
         # Open dataset from AWS S3
         AWSRaster = gdal.Open(AWSPrefix + imageSource, gdal.GA_ReadOnly)
@@ -104,6 +119,8 @@ def clipSource(imageSource, minX, maxX, minY, maxY):
 
         clippedImageForTileCreation = None # Close dataset
         AWSRaster = None
+        del AWSRaster
+        gdal.VSICurlClearCache()
         return outputName
 
 # add raster and se
