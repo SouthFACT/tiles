@@ -308,7 +308,7 @@ def handler(event, context):
     # }
 
     # create new hash so functions do not collide with each other
-    uniqueHash = uuid.uuid4()
+    uniqueHash = str(uuid.uuid4())
 
     # aws source based on AWS s3 folder/image.tif
     # imageBucket = event['imageBucket']
