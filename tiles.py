@@ -343,7 +343,7 @@ def handler(event, context):
     # this will always be temp and then will aws sync to s3
     OutputTileDirectory = '/mnt/efs/tmp/' + uniqueHash
     if not os.path.exists(OutputTileDirectory):
-        os.mkdir(OutputTileDirectory)
+        os.mkdirs(OutputTileDirectory, exist_ok=True)
 
     arg = {
         'extString': extString,
