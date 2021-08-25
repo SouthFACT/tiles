@@ -109,7 +109,7 @@ def clipSource(imageSource, minX, maxX, minY, maxY, hash):
 
 # add raster and se
 def addRaster(imageForTiles):
-    #add raster for tileing
+    # add raster for tiling
     rasterTileLayer = QgsRasterLayer(imageForTiles, 'TileLayer', 'gdal')
 
     if not rasterTileLayer.isValid():
@@ -341,7 +341,7 @@ def handler(event, context):
     extString = str(minX) + ',' + str(maxX) + ',' + str(minY) + ',' + str(maxY)
 
     # this will always be temp and then will aws sync to s3
-    OutputTileDirectory = '/mnt/efs/tmp'
+    OutputTileDirectory = '/mnt/efs/tmp/' + uniqueHash
     if not os.path.exists(OutputTileDirectory):
         os.mkdir(OutputTileDirectory)
 
