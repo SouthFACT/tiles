@@ -89,7 +89,8 @@ def clipSource(imageSource, minX, maxX, minY, maxY, hash):
         epsg4326.ImportFromEPSG(4326)
 
         # Create clipped reprojected raster with unique hash
-        outputName = '/mnt/efs/tmp/temp' + hash + '.vrt'
+        outputName = '/mnt/efs/tmp/clipped_' + minX + '_' + minY + '_' + maxX + '_' + maxY + '.vrt'
+        print('creating vrt with name' +str(outputName))
         clippedImageForTileCreation = gdal.Warp(outputName,
                                                 AWSRaster,
                                                 format=RasterFormat,
@@ -360,7 +361,15 @@ def handler(event, context):
 
     s3.download_file(styleBucket, styleFile, qgisStylePath)
 
-    imageForTiles = clipSource(efsPath, minX, maxX, minY, maxY, uniqueHash)
+    #imageForTiles = clipSource(efsPath, minX, maxX, minY, maxY, uniqueHash)
+    if (event['whichVRT'] == 'first'):
+        print('first VRT')
+        imageForTiles = '/mnt/efs/tmp/clipped_-179.999996920672_0_0_85.051128514163.vrt'
+    else:
+        print('used other maxY')
+        imageForTiles = '/mnt/efs/tmp/clipped_-78.74999865_31.95216175_-75.9374987_34.30714334.vrt'
+    #imageForTiles = '/mnt/efs/tmp/clipped_-78.7499986531.95216175-75.937498734.30714334.vrt'
+    #imageForTiles = '/mnt/efs/tmp/clipped_-78.7499986531.95216175-75.937498734.30714334.vrt'
     rasterTileLayer = addRaster(imageForTiles)
     rasterCRS = rasterTileLayer.crs()
 
