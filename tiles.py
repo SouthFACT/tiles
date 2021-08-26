@@ -6,6 +6,7 @@ S3 = boto3.client('s3')
 
 from processing.core.Processing import Processing
 
+from shutil import copyfile
 from osgeo import gdal
 from osgeo import osr
 from qgis.utils import *
@@ -70,14 +71,18 @@ canvas.show()
 
 def clipSource(imageSource, minX, maxX, minY, maxY, hash):
         print('grabbing image for processing tiles')
-        # RasterFormat = 'GTiff'
-        RasterFormat = 'VRT'
+        RasterFormat = 'GTiff'
+        # RasterFormat = 'VRT'
         PixelRes = 240
         #AWSPrefix = '/vsis3/'
 
         # Open dataset from AWS EFS
         #AWSRaster = gdal.Open(AWSPrefix + imageSource, gdal.GA_ReadOnly)
-        AWSRaster = gdal.Open(imageSource, gdal.GA_ReadOnly)
+        uniqueHashTwo = str(uuid.uuid4())
+        tmp = '/mnt/efs/tmp/' + uniqueHashTwo + '.tif'
+        print('temp name' + tmp)
+        copyfile(imageSource, tmp)
+        AWSRaster = gdal.Open(tmp, gdal.GA_ReadOnly)
         RasterProjection = AWSRaster.GetProjectionRef()
 
         #create 3857 project definition
@@ -89,7 +94,7 @@ def clipSource(imageSource, minX, maxX, minY, maxY, hash):
         epsg4326.ImportFromEPSG(4326)
 
         # Create clipped reprojected raster with unique hash
-        outputName = '/mnt/efs/tmp/clipped_' + minX + '_' + minY + '_' + maxX + '_' + maxY + '.vrt'
+        outputName = '/mnt/efs/tmp/clipped_' + hash + '.tif'
         print('creating vrt with name' +str(outputName))
         clippedImageForTileCreation = gdal.Warp(outputName,
                                                 AWSRaster,
@@ -105,7 +110,10 @@ def clipSource(imageSource, minX, maxX, minY, maxY, hash):
                                                 options=['COMPRESS=LZW'])
 
         clippedImageForTileCreation = None # Close dataset
+        # garbage collection for source tif
+        del AWSRaster
         AWSRaster = None
+        os.remove(tmp)
         return outputName
 
 # add raster and se
@@ -361,15 +369,15 @@ def handler(event, context):
 
     s3.download_file(styleBucket, styleFile, qgisStylePath)
 
-    #imageForTiles = clipSource(efsPath, minX, maxX, minY, maxY, uniqueHash)
-    if (event['whichVRT'] == 'first'):
-        print('first VRT')
-        imageForTiles = '/mnt/efs/tmp/clipped_-179.999996920672_0_0_85.051128514163.vrt'
-    else:
-        print('used other maxY')
-        imageForTiles = '/mnt/efs/tmp/clipped_-78.74999865_31.95216175_-75.9374987_34.30714334.vrt'
-    #imageForTiles = '/mnt/efs/tmp/clipped_-78.7499986531.95216175-75.937498734.30714334.vrt'
-    #imageForTiles = '/mnt/efs/tmp/clipped_-78.7499986531.95216175-75.937498734.30714334.vrt'
+    imageForTiles = clipSource(efsPath, minX, maxX, minY, maxY, uniqueHash)
+    # if (event['whichVRT'] == 'first'):
+    #     print('first VRT')
+    #     imageForTiles = '/mnt/efs/tmp/clipped_-179.999996920672_0_0_85.051128514163.vrt'
+    # else:
+    #     print('used other maxY')
+    #     imageForTiles = '/mnt/efs/tmp/clipped_-78.74999865_31.95216175_-75.9374987_34.30714334.vrt'
+    # #imageForTiles = '/mnt/efs/tmp/clipped_-78.7499986531.95216175-75.937498734.30714334.vrt'
+    # #imageForTiles = '/mnt/efs/tmp/clipped_-78.7499986531.95216175-75.937498734.30714334.vrt'
     rasterTileLayer = addRaster(imageForTiles)
     rasterCRS = rasterTileLayer.crs()
 
