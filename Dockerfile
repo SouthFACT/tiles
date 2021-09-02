@@ -1,13 +1,18 @@
-FROM qgis/qgis:latest
+FROM osgeo/gdal:ubuntu-full-3.3.1
+
+RUN apt-get update && apt-get install -y python3-pip && pip3 install --upgrade pip && apt-get clean
+RUN pip3 --no-cache-dir install boto3
+RUN pip3 --no-cache-dir install urllib3
 ARG FUNCTION_DIR="/app"
 
 RUN apt-get update && apt-get install -y python3-pip && pip3 install --upgrade pip && apt-get clean
 RUN pip3 --no-cache-dir install boto3
 RUN pip3 --no-cache-dir install urllib3
+
 RUN apt-get clean
-RUN pip cache purge
-
-
+RUN pip3 cache purge
+#
+#
 WORKDIR /
 RUN mkdir -p ${FUNCTION_DIR}
 RUN pip3 install --upgrade --target ${FUNCTION_DIR} awslambdaric
