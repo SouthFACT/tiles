@@ -1,11 +1,10 @@
-import sys, os, glob, time, uuid, csv, warnings, itertools, processing, numpy, boto3
+import sys, os, glob, time, uuid, csv, warnings, itertools, processing, numpy, boto3, uuid, shutil
 
-start_time = time.time()
-
-S3 = boto3.client('s3')
+#S3 = boto3.client('s3')
 
 from processing.core.Processing import Processing
 
+from shutil import copyfile
 from osgeo import gdal
 from osgeo import osr
 from qgis.utils import *
@@ -40,7 +39,7 @@ from qgis.PyQt.QtCore import QSize
 gdal.PushErrorHandler('CPLQuietErrorHandler')
 gdal.UseExceptions()    # Enable exceptions
 
-# warnings.filterwarnings("ignore", category=DeprecationWarning)  # ignore annoying Deprecation Warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)  # ignore annoying Deprecation Warnings
 warnings.filterwarnings("ignore")
 
 # See https://gis.stackexchange.com/a/155852/4972 for details about the prefix
@@ -50,7 +49,9 @@ crs = QgsCoordinateReferenceSystem('EPSG:4326')
 
 # make sure the enviroment is setup to be no screen or code
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+#os.environ['QGIS_PREFIX_PATH'] = '/app'
 qgs = QgsApplication([], False)
+qgs.setPrefixPath('/usr', True)
 qgs.initQgis()
 
 # Append the path where processing plugin can be found
@@ -61,22 +62,27 @@ Processing.initialize()
 # overall progress through the model
 feedback = QgsProcessingFeedback()
 outputs = {}
-QgsApplication.processingRegistry().addProvider(QgsNativeAlgorithms())
+qgs.processingRegistry().addProvider(QgsNativeAlgorithms())
 canvas = QgsMapCanvas()
 
 # Get the project instance
 project = QgsProject.instance()
 canvas.show()
 
-def clipSource(imageSource, minX, maxX, minY, maxY):
-        print('grabing image for processing tiles')
-        # RasterFormat = 'GTiff'
-        RasterFormat = 'VRT'
+def clipSource(imageSource, minX, maxX, minY, maxY, hash):
+        print('grabbing ' + str(imageSource) + ' for processing tiles')
+        RasterFormat = 'GTiff'
+        # RasterFormat = 'VRT'
         PixelRes = 240
-        AWSPrefix = '/vsis3/'
+        #AWSPrefix = '/vsis3/'
 
-        # Open dataset from AWS S3
-        AWSRaster = gdal.Open(AWSPrefix + imageSource, gdal.GA_ReadOnly)
+        # Open dataset from AWS EFS
+        #AWSRaster = gdal.Open(AWSPrefix + imageSource, gdal.GA_ReadOnly)
+        #uniqueHashTwo = str(uuid.uuid4())
+        #tmp = '/mnt/efs/tmp/' + uniqueHashTwo + '.tif'
+        #print('temp name' + tmp)
+        #copyfile(imageSource, tmp)
+        AWSRaster = gdal.Open(imageSource, gdal.GA_ReadOnly)
         RasterProjection = AWSRaster.GetProjectionRef()
 
         #create 3857 project definition
@@ -87,8 +93,9 @@ def clipSource(imageSource, minX, maxX, minY, maxY):
         epsg4326 = osr.SpatialReference()
         epsg4326.ImportFromEPSG(4326)
 
-        # Create clipped reprojected raster
-        outputName = '/tmp/temp.vrt'
+        # Create clipped reprojected raster with unique hash
+        outputName = '/mnt/efs/tmp/clipped_' + hash + '.tif'
+        print('creating clippedImage with name' +str(outputName))
         clippedImageForTileCreation = gdal.Warp(outputName,
                                                 AWSRaster,
                                                 format=RasterFormat,
@@ -103,12 +110,14 @@ def clipSource(imageSource, minX, maxX, minY, maxY):
                                                 options=['COMPRESS=LZW'])
 
         clippedImageForTileCreation = None # Close dataset
+        # garbage collection for source tif
+        del AWSRaster
         AWSRaster = None
         return outputName
 
 # add raster and se
 def addRaster(imageForTiles):
-    #add raster for tileing
+    print('creating raster layer for: ' + str(imageForTiles))
     rasterTileLayer = QgsRasterLayer(imageForTiles, 'TileLayer', 'gdal')
 
     if not rasterTileLayer.isValid():
@@ -143,7 +152,7 @@ def addStyle(qgisStylePath, rasterTileLayer):
         'INPUT': rasterTileLayer,
         'STYLE': qgisStylePath
     }
-    outputs['SetStyleForRasterLayer'] = processing.run('qgis:setstyleforrasterlayer', alg_params, feedback=feedback, is_child_algorithm=True)
+    outputs['SetStyleForRasterLayer'] = processing.run('qgis:setstyleforrasterlayer', alg_params, feedback=QgsProcessingFeedback(), is_child_algorithm=True)
     return outputs
 
 def deleteEmptyTiles(arg):
@@ -154,9 +163,9 @@ def deleteEmptyTiles(arg):
 
 
     # delete empty tile images
-    print('...Starting deleting empty tiles for at zoom level ' + str(zoom))
+    print('...Starting deleting empty tiles for zoom level ' + str(zoom))
     deleteEmptyFile(tileDelDir)
-    print('...Completed deleting empty tiles for at zoom level ' + str(zoom))
+    print('...Completed deleting empty tiles for zoom level ' + str(zoom))
     return 0
 
 # uplopads the tiles to s3
@@ -177,6 +186,9 @@ def uploadTiles(arg):
 
             for file in files:
                 complete_file_path = os.path.join(root, file)
+                if complete_file_path.split('\, ')[-1].startswith('.'):
+                    print('ignoring hidden file ' + str(complete_file_path))
+                    continue
                 file = nested_dir + file if nested_dir else file
                 s3FolderAndFile = tileFolder + '/' + str(zoom) + '/' + file
                 s3.upload_file(complete_file_path, tileBucket, s3FolderAndFile)
@@ -288,7 +300,7 @@ def convert(seconds):
 
     return "%d:%02d:%02d" % (hour, minutes, seconds)
 
-# lambda hanlder function
+#lambda handler function
 def handler(event, context):
     # get events passed into lambda via string like this:
     # {
@@ -302,13 +314,20 @@ def handler(event, context):
     #   "styleBucket": "data.southfact.com",
     #   "styleFile": "qgis-styles-for-tile-creation/SWIR_SOUTHFACT_nodata_0.qml",
     #   "tileBucket": "tiles.southfact.com",
-    #   "tileFolder": "latest_change_SWIR_L8"
+    #   "tileFolder": "latest_change_SWIR_L8",
+    #   "efsPath": "/mnt/efs/swirLatestChangeL8CONUS.tif"
     # }
 
+    start_time = time.time()
+
+    # create new hash so functions do not collide with each other
+    uniqueHash = str(uuid.uuid4())
+
     # aws source based on AWS s3 folder/image.tif
-    imageBucket = event['imageBucket']
-    imageFile = event['imageFile']
-    imageSource =  imageBucket + '/' + imageFile
+    # imageBucket = event['imageBucket']
+    # imageFile = event['imageFile']
+    # imageSource =  imageBucket + '/' + imageFile
+    efsPath = event['efsPath']
 
     # the bounds of minX etc should be in WGS84 lat long and should be  a bounds of
     # equal to zoom level 7 box. the ideas is that the function will take in as argument a
@@ -328,33 +347,37 @@ def handler(event, context):
     tileBucket = event['tileBucket']
     tileFolder =  event['tileFolder']
 
-    # zoom level to process
-    zoomLevel = event['zoomLevel']
+    # zoom levels to process
+    minZoomLevel = event['minZoomLevel']
+    maxZoomLevel = event['maxZoomLevel']
+    #zoomLevel = event['zoomLevel']
 
     # get arguments for tile
     extString = str(minX) + ',' + str(maxX) + ',' + str(minY) + ',' + str(maxY)
 
     # this will always be temp and then will aws sync to s3
-    OutputTileDirectory = '/tmp/cache'
+    OutputTileDirectory = '/mnt/efs/tmp/' + uniqueHash
     if not os.path.exists(OutputTileDirectory):
-        os.mkdir(OutputTileDirectory)
+        os.makedirs(OutputTileDirectory, exist_ok=True)
 
     arg = {
         'extString': extString,
-        'zoomLevel': zoomLevel,
+        'minZoomLevel': minZoomLevel,
+        'maxZoomLevel': maxZoomLevel,
+        #'zoomLevel': zoomLevel,
         'OutputTileDirectory': OutputTileDirectory,
         'tileBucket': tileBucket,
         'tileFolder': tileFolder
     }
 
-    # so more can be done at the same time
-    qgisStylePath = '/tmp/qgisstyle.qml'
+    # so more can be done at the same time. Also hash the path so no collisions
+    qgisStylePath = '/mnt/efs/tmp/qgisstyle' + uniqueHash + '.qml'
 
     s3 = boto3.client('s3')
 
     s3.download_file(styleBucket, styleFile, qgisStylePath)
 
-    imageForTiles = clipSource(imageSource, minX, maxX, minY, maxY)
+    imageForTiles = clipSource(efsPath, minX, maxX, minY, maxY, uniqueHash)
     rasterTileLayer = addRaster(imageForTiles)
     rasterCRS = rasterTileLayer.crs()
 
@@ -365,11 +388,18 @@ def handler(event, context):
         setupEnviroment(rasterTileLayer)
         addStyle(qgisStylePath, rasterTileLayer)
 
-        createTiles(arg)
+        for zoomLevel in range(int(minZoomLevel), int(maxZoomLevel) + 1):
+            print("Running create tiles for zoom level: " + str(zoomLevel))
+            arg['zoomLevel'] = zoomLevel
+            createTiles(arg)
     else:
-        print("The raster does not have a valid projection, its likely you created it with software that created a custom or vendor specific projection. You shoould try reprojecting the image with gdal, gdalwarp to a defined proj4 projection, the site http://spatialreference.org/ref/epsg/3031/ can help find the correct and known EPSG code.")
+        print("The raster does not have a valid projection, it's likely you created it with software that created a custom or vendor specific projection. You shoould try reprojecting the image with gdal, gdalwarp to a defined proj4 projection, the site http://spatialreference.org/ref/epsg/3031/ can help find the correct and known EPSG code.")
 
-    QgsApplication.exitQgis()
+    # remove tile image
+    print('removing clipped image: ' + str(imageForTiles))
+    os.remove(imageForTiles)
+    print('removing temporary tiles that were uploaded to s3: ' + str(OutputTileDirectory))
+    shutil.rmtree(OutputTileDirectory)
     end_time = time.time()
     print("Took %s to create the tiles." % (convert(end_time-start_time)))
     return 0
